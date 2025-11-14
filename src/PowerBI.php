@@ -23,11 +23,36 @@ class PowerBI extends Connector
     /** @var string The client secret for the Power BI application */
     protected string $clientSecret;
 
-    public function __construct()
-    {
-        $this->tenant = config()->string('powerbi.tenant');
-        $this->clientId = config()->string('powerbi.client_id');
-        $this->clientSecret = config()->string('powerbi.client_secret');
+    /**
+     * Create a new PowerBI connector instance.
+     *
+     * @param  string|null  $tenant  Optional tenant ID override
+     * @param  string|null  $clientId  Optional client ID override
+     * @param  string|null  $clientSecret  Optional client secret override
+     *
+     * @throws \InvalidArgumentException When partial credentials are provided
+     */
+    public function __construct(
+        ?string $tenant = null,
+        ?string $clientId = null,
+        ?string $clientSecret = null
+    ) {
+        // Validate that if any parameter is provided, all must be provided
+        $providedParams = array_filter([
+            'tenant' => $tenant,
+            'clientId' => $clientId,
+            'clientSecret' => $clientSecret,
+        ], fn ($value) => $value !== null);
+
+        if (count($providedParams) > 0 && count($providedParams) < 3) {
+            throw new \InvalidArgumentException(
+                'When overriding credentials, all three parameters (tenant, clientId, clientSecret) must be provided'
+            );
+        }
+
+        $this->tenant = $tenant ?? config()->string('powerbi.tenant');
+        $this->clientId = $clientId ?? config()->string('powerbi.client_id');
+        $this->clientSecret = $clientSecret ?? config()->string('powerbi.client_secret');
     }
 
     /**
