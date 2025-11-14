@@ -15,6 +15,12 @@
     cacheDirectory=".phpunit.cache"
     backupStaticProperties="false"
 >
+    <php>
+        <env name="APP_ENV" value="testing" />
+        <!-- <env name="POWER_BI_TENANT" value="" /> -->
+        <!-- <env name="POWER_BI_CLIENT_ID" value="" /> -->
+        <!-- <env name="POWER_BI_CLIENT_SECRET" value="" /> -->
+    </php>
     <testsuites>
         <testsuite name="InterWorks Test Suite">
             <directory>tests</directory>
