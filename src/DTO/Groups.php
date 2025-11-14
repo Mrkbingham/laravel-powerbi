@@ -3,7 +3,6 @@
 namespace InterWorks\PowerBI\DTO;
 
 use Illuminate\Support\Collection;
-use InterWorks\PowerBI\DTO\Group;
 use Saloon\Contracts\DataObjects\WithResponse;
 use Saloon\Traits\Responses\HasResponse;
 
@@ -14,7 +13,7 @@ class Groups implements WithResponse
     /**
      * Constructor
      *
-     * @param Collection<int, Group> $groups
+     * @param  Collection<int, Group>  $groups
      */
     public function __construct(
         public readonly Collection $groups,
@@ -30,9 +29,7 @@ class Groups implements WithResponse
      *    type: string,
      *    name: string
      * }> $data The array to parse.
-     *
-     * @return self
-    */
+     */
     public static function fromArray(array $data): self
     {
         $groups = collect($data)->map(function ($item) {

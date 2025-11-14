@@ -12,7 +12,7 @@ test('can get groups', function () {
         GetGroups::class => new PowerBIFixture('groups/get-groups'),
     ]);
 
-    $powerBIConnection = new PowerBI();
+    $powerBIConnection = new PowerBI;
     $authenticator = $powerBIConnection->getAccessToken();
     $powerBIConnection->authenticate($authenticator);
     $request = new GetGroups;
