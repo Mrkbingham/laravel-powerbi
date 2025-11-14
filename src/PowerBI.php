@@ -4,8 +4,8 @@ namespace InterWorks\PowerBI;
 
 use Saloon\Helpers\OAuth2\OAuthConfig;
 use Saloon\Http\Connector;
-use Saloon\Http\Request;
 use Saloon\Http\OAuth2\GetClientCredentialsTokenRequest;
+use Saloon\Http\Request;
 use Saloon\Traits\OAuth2\ClientCredentialsGrant;
 use Saloon\Traits\Plugins\AcceptsJson;
 
