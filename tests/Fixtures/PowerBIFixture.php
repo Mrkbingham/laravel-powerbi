@@ -1,0 +1,32 @@
+<?php
+
+namespace InterWorks\PowerBI\Tests\Fixtures;
+
+use Saloon\Http\Faking\Fixture;
+
+use function Pest\Faker\fake;
+
+class PowerBIFixture extends Fixture
+{
+    protected function defineName(): string
+    {
+        return 'power_bi';
+    }
+
+    protected function defineSensitiveHeaders(): array
+    {
+        return [
+            'Authorization' => 'REDACTED',
+            'RequestId' => 'REDACTED',
+        ];
+    }
+
+    protected function defineSensitiveJsonParameters(): array
+    {
+        return [
+            'token' => 'REDACTED',
+            'id' => fn () => fake()->uuid,
+            'clientId' => fn () => fake()->uuid,
+        ];
+    }
+}
