@@ -67,7 +67,6 @@ abstract class PowerBIConnectorBase extends Connector
         return parent::send($request, $mockClient, $handleRetry);
     }
 
-
     //
     // Account Type Restriction Enforcement
     //
