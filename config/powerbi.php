@@ -38,4 +38,17 @@ return [
     */
     'admin_client_id' => env('POWER_BI_ADMIN_CLIENT_ID', ''),
     'admin_client_secret' => env('POWER_BI_ADMIN_CLIENT_SECRET', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Azure User OAuth Redirect URI (Authorization Code Grant)
+    |--------------------------------------------------------------------------
+    |
+    | Redirect URI for Azure User authentication. Azure User authentication
+    | uses the same client_id and client_secret as the standard Service
+    | Principal, but with Authorization Code Grant flow requiring browser-based
+    | user authentication. Use with PowerBI::azureUser().
+    |
+    */
+    'redirect_uri' => env('POWER_BI_REDIRECT_URI', ''),
 ];

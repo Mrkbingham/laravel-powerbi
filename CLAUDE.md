@@ -75,12 +75,19 @@ The package uses a hierarchical connector architecture to support multiple OAuth
   - User-delegated authentication with browser redirect
   - Supports access token refresh via refresh tokens
 
-**Factory Class**:
+**Factory Class & Facade**:
 - **`PowerBI`** (`src/PowerBI.php`): Factory class that provides:
-  - Static `create()` method to instantiate appropriate connector based on account type
-  - Convenience methods: `servicePrinciple()`, `AdminServicePrinciple()`, `azureUser()`
-  - Legacy constructor support for backward compatibility (Service Principal only)
-  - Configuration resolution from `config/powerbi.php`
+  - Static factory methods: `servicePrinciple()`, `adminServicePrinciple()`, `azureUser()`, `create()`
+  - Singleton connector management: `connector()`, `setConnector()`, `resetConnector()`
+  - Authentication helpers: `authenticate()`, `getAccessToken()`
+  - Direct request methods: `getGroups()`, `getReportsInGroup()`, `getReportInGroup()`, etc.
+  - Magic method `__callStatic()` for dynamic request resolution
+  - Configuration resolution from `config/powerbi.php` with override support
+
+- **`PowerBI` Facade** (`src/Facades/PowerBI.php`): Laravel facade wrapper providing:
+  - Static access to all factory methods
+  - Registered as singleton in service container
+  - Import via `use InterWorks\PowerBI\Facades\PowerBI;`
 
 ### Request/Response Pattern
 
@@ -122,13 +129,15 @@ The package supports two OAuth2 authentication flows:
 **2. Authorization Code Grant (Azure User)**:
 - Used for user-delegated authentication
 - Requires user browser interaction and consent
+- Uses the same `client_id` and `client_secret` as Service Principal, but with a different OAuth flow
 - Azure AD v1.0 endpoints
 - Authorization endpoint: `https://login.microsoftonline.com/{tenant}/oauth2/authorize`
 - Token endpoint: `https://login.microsoftonline.com/{tenant}/oauth2/token`
 - Environment variables:
-  - `POWER_BI_TENANT` - Azure AD tenant ID
-  - `POWER_BI_USER_CLIENT_ID` - User application client ID
-  - `POWER_BI_USER_CLIENT_SECRET` - User application client secret
+  - `POWER_BI_TENANT` - Azure AD tenant ID (shared with Service Principal)
+  - `POWER_BI_CLIENT_ID` - Application client ID (shared with Service Principal)
+  - `POWER_BI_CLIENT_SECRET` - Application client secret (shared with Service Principal)
+  - `POWER_BI_REDIRECT_URI` - OAuth callback/redirect URI (unique to Azure User flow)
 
 ### Account Type Restrictions
 
@@ -170,16 +179,93 @@ PHPStan configuration (`phpstan.neon`):
 
 ## Usage Examples
 
-### Service Principal (Client Credentials)
+The package provides two usage patterns:
+1. **Facade Pattern** (recommended): Static methods for quick access
+2. **Direct Connector Pattern**: Explicit connector instances for fine-grained control
+
+### Pattern 1: Facade Usage (Recommended)
+
+#### Using Default ServicePrincipal
+
+```php
+use InterWorks\PowerBI\Facades\PowerBI;
+
+// Authenticate with default ServicePrincipal (loaded from config)
+$token = PowerBI::getAccessToken();
+PowerBI::authenticate($token);
+
+// Make direct requests via facade
+$groups = PowerBI::getGroups();
+$reports = PowerBI::getReportsInGroup('group-id');
+$report = PowerBI::getReportInGroup('group-id', 'report-id');
+```
+
+#### Switching to AzureUser Connector
+
+```php
+use InterWorks\PowerBI\Facades\PowerBI;
+
+// Step 1: Switch to AzureUser connector
+// Note: Azure User uses the same client_id/client_secret as Service Principal
+// Only the redirect_uri is unique to Azure User flow
+$azureConnector = PowerBI::azureUser(
+    redirectUri: 'https://your-app.com/callback'
+);
+PowerBI::setConnector($azureConnector);
+
+// Generate authorization URL
+$authUrl = $azureConnector->getAuthorizationUrl();
+$state = $azureConnector->getState();
+session(['oauth_state' => $state]);
+return redirect($authUrl);
+
+// Step 2: Handle OAuth callback
+$code = request()->get('code');
+$state = request()->get('state');
+$sessionState = session('oauth_state');
+
+$token = PowerBI::getAccessToken($code, $state, $sessionState);
+PowerBI::authenticate($token);
+
+// Step 3: Make API calls (now uses AzureUser)
+$report = PowerBI::getReport('report-id'); // Works with AzureUser
+$dashboards = PowerBI::getDashboardsInGroup('group-id');
+```
+
+#### Using AdminServicePrincipal
+
+```php
+use InterWorks\PowerBI\Facades\PowerBI;
+
+// Switch to admin connector
+$adminConnector = PowerBI::adminServicePrinciple();
+PowerBI::setConnector($adminConnector);
+
+// Authenticate
+$token = PowerBI::getAccessToken();
+PowerBI::authenticate($token);
+
+// Access admin endpoints
+$allGroups = PowerBI::send(new GetGroupsAsAdmin());
+```
+
+### Pattern 2: Direct Connector Usage
+
+#### Service Principal (Client Credentials)
 
 ```php
 use InterWorks\PowerBI\PowerBI;
+use InterWorks\PowerBI\Requests\Groups\GetGroups;
 
-// Using factory method (recommended)
+// Create connector with explicit credentials
+$connector = PowerBI::servicePrinciple(
+    tenant: 'your-tenant-id',
+    clientId: 'your-client-id',
+    clientSecret: 'your-client-secret'
+);
+
+// Or load from config
 $connector = PowerBI::servicePrinciple();
-
-// Or using create method
-$connector = PowerBI::create(ConnectionAccountType::ServicePrinciple);
 
 // Authenticate
 $token = $connector->getAccessToken();
@@ -191,13 +277,14 @@ $response = $connector->send($request);
 $groups = $response->dto();
 ```
 
-### Admin Service Principal
+#### Admin Service Principal
 
 ```php
 use InterWorks\PowerBI\PowerBI;
+use InterWorks\PowerBI\Requests\Admin\Groups\GetGroupsAsAdmin;
 
-// Using convenience method (recommended)
-$connector = PowerBI::AdminServicePrinciple();
+// Using convenience method (loads admin credentials from config)
+$connector = PowerBI::adminServicePrinciple();
 
 // Authenticate
 $token = $connector->getAccessToken();
@@ -208,13 +295,26 @@ $request = new GetGroupsAsAdmin();
 $response = $connector->send($request);
 ```
 
-### Azure User (Authorization Code)
+#### Azure User (Authorization Code)
 
 ```php
 use InterWorks\PowerBI\PowerBI;
+use InterWorks\PowerBI\Requests\Reports\GetReport;
 
 // Step 1: Generate authorization URL
-$connector = PowerBI::azureUser();
+// Note: Azure User uses the same client_id and client_secret as Service Principal
+// Only the redirect_uri is unique to the Azure User flow
+$connector = PowerBI::azureUser(
+    redirectUri: 'https://your-app.com/callback'
+);
+// Or with explicit credentials:
+// $connector = PowerBI::azureUser(
+//     tenant: 'your-tenant-id',
+//     clientId: 'your-client-id',        // Same as Service Principal
+//     clientSecret: 'your-client-secret', // Same as Service Principal
+//     redirectUri: 'https://your-app.com/callback'
+// );
+
 $authUrl = $connector->getAuthorizationUrl();
 $state = $connector->getState();
 
@@ -244,7 +344,7 @@ if ($token->hasExpired()) {
 }
 $connector->authenticate($token);
 
-// Make API calls
+// Make API calls (AzureUser can access individual resource endpoints)
 $request = new GetReport('report-id');
 $response = $connector->send($request);
 ```

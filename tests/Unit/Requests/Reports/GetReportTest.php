@@ -1,6 +1,7 @@
 <?php
 
 use InterWorks\PowerBI\Connectors\PowerBIAzureUser;
+use InterWorks\PowerBI\Connectors\PowerBIServicePrincipal;
 use InterWorks\PowerBI\DTO\Report;
 use InterWorks\PowerBI\Enums\ConnectionAccountType;
 use InterWorks\PowerBI\Exceptions\AccountTypeRestrictedException;
@@ -76,15 +77,13 @@ describe('GetReport access control', function () {
     test('throws exception when ServicePrinciple attempts to access GetReport', function () {
         // Create connection with ServicePrinciple account type
         $powerBIConnection = new PowerBIServicePrincipal(
-            tenant: env('POWER_BI_TENANT'),
-            clientId: env('POWER_BI_CLIENT_ID'),
-            clientSecret: env('POWER_BI_CLIENT_SECRET'),
+            tenant: 'test-tenant',
+            clientId: 'test-client-id',
+            clientSecret: 'test-client-secret',
             connectionAccountType: ConnectionAccountType::ServicePrinciple
         );
 
-        $authenticator = $powerBIConnection->getAccessToken();
-        $powerBIConnection->authenticate($authenticator);
-
+        // No need to authenticate - the restriction check happens before the HTTP request
         // Attempt to send the request - should throw before making API call
         $request = new GetReport('test-report-id');
 
@@ -93,17 +92,15 @@ describe('GetReport access control', function () {
     });
 
     test('throws exception when AdminServicePrinciple attempts to access GetReport', function () {
-        // Create connection with ServicePrinciple account type
+        // Create connection with AdminServicePrinciple account type
         $powerBIConnection = new PowerBIServicePrincipal(
-            tenant: env('POWER_BI_TENANT'),
-            clientId: env('POWER_BI_CLIENT_ID'),
-            clientSecret: env('POWER_BI_CLIENT_SECRET'),
+            tenant: 'test-tenant',
+            clientId: 'test-admin-client-id',
+            clientSecret: 'test-admin-client-secret',
             connectionAccountType: ConnectionAccountType::AdminServicePrinciple
         );
 
-        $authenticator = $powerBIConnection->getAccessToken();
-        $powerBIConnection->authenticate($authenticator);
-
+        // No need to authenticate - the restriction check happens before the HTTP request
         // Attempt to send the request - should throw before making API call
         $request = new GetReport('test-report-id');
 
