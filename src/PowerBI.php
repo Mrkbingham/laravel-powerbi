@@ -2,127 +2,393 @@
 
 namespace InterWorks\PowerBI;
 
-use InterWorks\PowerBI\Exceptions\UnauthorizedAdminAccessException;
+use Illuminate\Support\Facades\Config;
+use InterWorks\PowerBI\Classes\PowerBIConnectorBase;
+use InterWorks\PowerBI\Connectors\PowerBIAzureUser;
+use InterWorks\PowerBI\Connectors\PowerBIServicePrincipal;
+use InterWorks\PowerBI\DTO\Dashboard;
+use InterWorks\PowerBI\DTO\Dashboards;
+use InterWorks\PowerBI\DTO\Groups;
+use InterWorks\PowerBI\DTO\Report;
+use InterWorks\PowerBI\DTO\Reports;
+use InterWorks\PowerBI\Enums\ConnectionAccountType;
+use InterWorks\PowerBI\Requests\Dashboards\GetDashboardInGroup;
+use InterWorks\PowerBI\Requests\Dashboards\GetDashboardsInGroup;
+use InterWorks\PowerBI\Requests\Groups\GetGroups;
+use InterWorks\PowerBI\Requests\Reports\GetReport;
+use InterWorks\PowerBI\Requests\Reports\GetReportInGroup;
+use InterWorks\PowerBI\Requests\Reports\GetReportsInGroup;
 use InvalidArgumentException;
-use Saloon\Helpers\OAuth2\OAuthConfig;
-use Saloon\Http\Connector;
-use Saloon\Http\OAuth2\GetClientCredentialsTokenRequest;
+use RuntimeException;
+use Saloon\Contracts\Authenticator;
+use Saloon\Http\Auth\TokenAuthenticator;
 use Saloon\Http\Request;
-use Saloon\Http\Response;
-use Saloon\Traits\OAuth2\ClientCredentialsGrant;
-use Saloon\Traits\Plugins\AcceptsJson;
-use Saloon\Traits\Plugins\AlwaysThrowOnErrors;
-use Throwable;
 
-class PowerBI extends Connector
+/**
+ * PowerBI Factory Class
+ *
+ * Provides static factory methods for creating Power BI connectors and
+ * convenience methods for making common API requests.
+ *
+ * Usage:
+ *   // Create connectors
+ *   $connector = PowerBI::servicePrinciple();
+ *   $connector = PowerBI::adminServicePrinciple();
+ *   $connector = PowerBI::azureUser();
+ *
+ *   // Direct requests using default connector
+ *   PowerBI::authenticate($token);
+ *   $groups = PowerBI::getGroups();
+ *   $report = PowerBI::getReportInGroup('group-id', 'report-id');
+ */
+class PowerBI
 {
-    use AcceptsJson;
-    use AlwaysThrowOnErrors;
-    use ClientCredentialsGrant;
+    /** @var PowerBIConnectorBase|null Singleton connector instance */
+    protected static ?PowerBIConnectorBase $connector = null;
 
-    /** @var string The tenant ID to authenticate to */
-    protected string $tenant;
-
-    /** @var string The client ID for the Power BI application */
-    protected string $clientId;
-
-    /** @var string The client secret for the Power BI application */
-    protected string $clientSecret;
+    //
+    // Factory Methods
+    //
 
     /**
-     * Create a new PowerBI connector instance.
+     * Create a Service Principal connector.
      *
-     * @param  string|null  $tenant  Optional tenant ID override
-     * @param  string|null  $clientId  Optional client ID override
-     * @param  string|null  $clientSecret  Optional client secret override
+     * Uses Client Credentials Grant for server-to-server authentication.
+     * Loads credentials from config if not provided.
      *
-     * @throws InvalidArgumentException When partial credentials are provided
+     * @param  string|null  $tenant  Azure AD tenant ID (defaults to config)
+     * @param  string|null  $clientId  Application client ID (defaults to config)
+     * @param  string|null  $clientSecret  Application client secret (defaults to config)
      */
-    public function __construct(
+    public static function servicePrinciple(
         ?string $tenant = null,
         ?string $clientId = null,
         ?string $clientSecret = null
-    ) {
-        // Validate that if any parameter is provided, all must be provided
-        $providedParams = array_filter([
-            'tenant' => $tenant,
-            'clientId' => $clientId,
-            'clientSecret' => $clientSecret,
-        ], fn ($value) => $value !== null);
+    ): PowerBIServicePrincipal {
+        return new PowerBIServicePrincipal(
+            tenant: $tenant,
+            clientId: $clientId,
+            clientSecret: $clientSecret,
+            connectionAccountType: ConnectionAccountType::ServicePrinciple
+        );
+    }
 
-        if (count($providedParams) > 0 && count($providedParams) < 3) {
-            throw new InvalidArgumentException(
-                'When overriding credentials, all three parameters (tenant, clientId, clientSecret) must be provided'
+    /**
+     * Create an Admin Service Principal connector.
+     *
+     * Uses Client Credentials Grant with admin-level credentials.
+     * Required for accessing admin endpoints (/admin/*).
+     * Loads admin credentials from config if not provided.
+     *
+     * @param  string|null  $tenant  Azure AD tenant ID (defaults to config)
+     * @param  string|null  $clientId  Admin application client ID (defaults to config admin_client_id)
+     * @param  string|null  $clientSecret  Admin application client secret (defaults to config admin_client_secret)
+     */
+    public static function adminServicePrinciple(
+        ?string $tenant = null,
+        ?string $clientId = null,
+        ?string $clientSecret = null
+    ): PowerBIServicePrincipal {
+        return new PowerBIServicePrincipal(
+            tenant: $tenant,
+            clientId: $clientId ?? Config::string('powerbi.admin_client_id'),
+            clientSecret: $clientSecret ?? Config::string('powerbi.admin_client_secret'),
+            connectionAccountType: ConnectionAccountType::AdminServicePrinciple
+        );
+    }
+
+    /**
+     * Create an Azure User connector.
+     *
+     * Uses Authorization Code Grant for user-delegated authentication.
+     * Requires browser-based OAuth flow with user consent.
+     * Uses the same client credentials as Service Principal but with a different OAuth flow.
+     * Loads credentials from config if not provided.
+     *
+     * @param  string|null  $tenant  Azure AD tenant ID (defaults to config)
+     * @param  string|null  $clientId  Application client ID (defaults to config client_id)
+     * @param  string|null  $clientSecret  Application client secret (defaults to config client_secret)
+     * @param  string|null  $redirectUri  OAuth callback URI (defaults to config redirect_uri)
+     */
+    public static function azureUser(
+        ?string $tenant = null,
+        ?string $clientId = null,
+        ?string $clientSecret = null,
+        ?string $redirectUri = null
+    ): PowerBIAzureUser {
+        return new PowerBIAzureUser(
+            tenant: $tenant ?? Config::string('powerbi.tenant'),
+            clientId: $clientId ?? Config::string('powerbi.client_id'),
+            clientSecret: $clientSecret ?? Config::string('powerbi.client_secret'),
+            redirectUri: $redirectUri ?? Config::string('powerbi.redirect_uri')
+        );
+    }
+
+    /**
+     * Create a connector by account type.
+     *
+     * Factory method that creates the appropriate connector based on the
+     * specified ConnectionAccountType enum value.
+     *
+     * @param  ConnectionAccountType  $type  The account type
+     * @param  array<string, mixed>  $credentials  Optional credential overrides
+     *
+     * @throws InvalidArgumentException When credentials are missing for AzureUser
+     */
+    public static function create(
+        ConnectionAccountType $type,
+        array $credentials = []
+    ): PowerBIConnectorBase {
+        return match ($type) {
+            ConnectionAccountType::ServicePrinciple => static::servicePrinciple(
+                tenant: isset($credentials['tenant']) && is_string($credentials['tenant']) ? $credentials['tenant'] : null,
+                clientId: isset($credentials['client_id']) && is_string($credentials['client_id']) ? $credentials['client_id'] : null,
+                clientSecret: isset($credentials['client_secret']) && is_string($credentials['client_secret']) ? $credentials['client_secret'] : null
+            ),
+            ConnectionAccountType::AdminServicePrinciple => static::adminServicePrinciple(
+                tenant: isset($credentials['tenant']) && is_string($credentials['tenant']) ? $credentials['tenant'] : null,
+                clientId: isset($credentials['client_id']) && is_string($credentials['client_id']) ? $credentials['client_id'] : null,
+                clientSecret: isset($credentials['client_secret']) && is_string($credentials['client_secret']) ? $credentials['client_secret'] : null
+            ),
+            ConnectionAccountType::AzureUser => static::azureUser(
+                tenant: isset($credentials['tenant']) && is_string($credentials['tenant']) ? $credentials['tenant'] : null,
+                clientId: isset($credentials['client_id']) && is_string($credentials['client_id']) ? $credentials['client_id'] : null,
+                clientSecret: isset($credentials['client_secret']) && is_string($credentials['client_secret']) ? $credentials['client_secret'] : null,
+                redirectUri: isset($credentials['redirect_uri']) && is_string($credentials['redirect_uri']) ? $credentials['redirect_uri'] : null
+            ),
+        };
+    }
+
+    //
+    // Connector Management
+    //
+
+    /**
+     * Get the current singleton connector instance.
+     *
+     * Creates a default Service Principal connector if none exists.
+     */
+    public static function connector(): PowerBIConnectorBase
+    {
+        if (static::$connector === null) {
+            static::$connector = static::servicePrinciple();
+        }
+
+        return static::$connector;
+    }
+
+    /**
+     * Set the singleton connector instance.
+     *
+     * Use this to switch between connector types at runtime.
+     *
+     * @param  PowerBIConnectorBase  $connector  The connector to use
+     */
+    public static function setConnector(PowerBIConnectorBase $connector): void
+    {
+        static::$connector = $connector;
+    }
+
+    /**
+     * Reset the singleton connector to default Service Principal.
+     */
+    public static function resetConnector(): void
+    {
+        static::$connector = null;
+    }
+
+    //
+    // Authentication Helpers
+    //
+
+    /**
+     * Authenticate the current connector.
+     *
+     * @param  Authenticator|string  $token  OAuth token or authenticator
+     */
+    public static function authenticate(Authenticator|string $token): void
+    {
+        if (is_string($token)) {
+            $token = new TokenAuthenticator($token);
+        }
+
+        static::connector()->authenticate($token);
+    }
+
+    /**
+     * Get an access token for the current connector.
+     *
+     * For Service Principal: Returns the access token directly.
+     * For Azure User: Pass authorization code, state, and session state.
+     *
+     * @param  mixed  ...$args  Arguments passed to the connector's getAccessToken method
+     *
+     * @throws RuntimeException When the connector doesn't support getting access tokens
+     */
+    public static function getAccessToken(mixed ...$args): mixed
+    {
+        $connector = static::connector();
+
+        if (! method_exists($connector, 'getAccessToken')) {
+            throw new RuntimeException(
+                'Current connector does not support getAccessToken method'
             );
         }
 
-        $this->tenant = $tenant ?? config()->string('powerbi.tenant');
-        $this->clientId = $clientId ?? config()->string('powerbi.client_id');
-        $this->clientSecret = $clientSecret ?? config()->string('powerbi.client_secret');
-    }
-
-    /**
-     * The Base URL of the API.
-     */
-    public function resolveBaseUrl(): string
-    {
-        return 'https://api.powerbi.com/v1.0/myorg';
-    }
-
-    /**
-     * The OAuth2 configuration
-     */
-    protected function defaultOauthConfig(): OAuthConfig
-    {
-        return OAuthConfig::make()
-            ->setClientId($this->clientId)
-            ->setClientSecret($this->clientSecret)
-            ->setTokenEndpoint($this->getAccessTokenEndpoint())
-            ->setRequestModifier(function (Request $request) {
-                /** @var GetClientCredentialsTokenRequest $request */
-                // Add the resource to the body
-                $request->body()->add('resource', $this->getResourceUrl());
-            });
-    }
-
-    /**
-     * Returns the access token endpoint.
-     */
-    private function getAccessTokenEndpoint(): string
-    {
-        return "https://login.windows.net/{$this->tenant}/oauth2/token";
-    }
-
-    /**
-     * Returns the resource URL.
-     */
-    private function getResourceUrl(): string
-    {
-        return 'https://analysis.windows.net/powerbi/api';
+        return $connector->getAccessToken(...$args);
     }
 
     //
-    // Error handling
+    // Common Request Methods
     //
 
     /**
-     * Get a custom exception for the failed request.
+     * Get all groups (workspaces).
+     */
+    public static function getGroups(): Groups
+    {
+        /** @var Groups */
+        return static::send(new GetGroups);
+    }
+
+    /**
+     * Get reports in a specific group.
      *
-     * This method provides detailed error messages for common failure scenarios,
-     * particularly for unauthorized access to admin endpoints.
+     * @param  string  $groupId  The group (workspace) ID
      */
-    public function getRequestException(Response $response, ?Throwable $senderException): ?Throwable
+    public static function getReportsInGroup(string $groupId): Reports
     {
-        // Handle unauthorized access to admin endpoints
-        if ($response->status() === 401) {
-            $endpoint = $response->getPendingRequest()->getRequest()->resolveEndpoint();
+        /** @var Reports */
+        return static::send(new GetReportsInGroup($groupId));
+    }
 
-            if (str_starts_with($endpoint, '/admin')) {
-                return UnauthorizedAdminAccessException::make($response, $endpoint);
+    /**
+     * Get a specific report in a group.
+     *
+     * @param  string  $groupId  The group (workspace) ID
+     * @param  string  $reportId  The report ID
+     */
+    public static function getReportInGroup(string $groupId, string $reportId): Report
+    {
+        /** @var Report */
+        return static::send(new GetReportInGroup($groupId, $reportId));
+    }
+
+    /**
+     * Get a specific report by ID (AzureUser only).
+     *
+     * Note: This endpoint is restricted to AzureUser account type.
+     * Service Principal accounts must use getReportInGroup instead.
+     *
+     * @param  string  $reportId  The report ID
+     *
+     * @throws \InterWorks\PowerBI\Exceptions\AccountTypeRestrictedException
+     */
+    public static function getReport(string $reportId): Report
+    {
+        /** @var Report */
+        return static::send(new GetReport($reportId));
+    }
+
+    /**
+     * Get dashboards in a specific group.
+     *
+     * @param  string  $groupId  The group (workspace) ID
+     */
+    public static function getDashboardsInGroup(string $groupId): Dashboards
+    {
+        /** @var Dashboards */
+        return static::send(new GetDashboardsInGroup($groupId));
+    }
+
+    /**
+     * Get a specific dashboard in a group.
+     *
+     * @param  string  $groupId  The group (workspace) ID
+     * @param  string  $dashboardId  The dashboard ID
+     */
+    public static function getDashboardInGroup(string $groupId, string $dashboardId): Dashboard
+    {
+        /** @var Dashboard */
+        return static::send(new GetDashboardInGroup($groupId, $dashboardId));
+    }
+
+    //
+    // Low-Level Request Sending
+    //
+
+    /**
+     * Send a request using the current connector.
+     *
+     * @param  Request  $request  The Saloon request instance
+     * @return mixed The DTO from createDtoFromResponse
+     */
+    public static function send(Request $request): mixed
+    {
+        $response = static::connector()->send($request);
+
+        return $response->dto();
+    }
+
+    /**
+     * Magic method to dynamically proxy request methods.
+     *
+     * Converts method calls like PowerBI::getSomething($args) into
+     * Request class instantiation and sending.
+     *
+     * @param  string  $method  The method name
+     * @param  array<mixed>  $args  The method arguments
+     *
+     * @throws RuntimeException When the request class cannot be found or instantiated
+     */
+    public static function __callStatic(string $method, array $args): mixed
+    {
+        // Try to map the method to a Request class
+        $requestClass = static::resolveRequestClass($method);
+
+        if ($requestClass === null) {
+            throw new RuntimeException(
+                "Method {$method} does not exist and could not be resolved to a Request class"
+            );
+        }
+
+        // Instantiate the request with the provided arguments
+        $request = new $requestClass(...$args);
+
+        // Send the request
+        return static::send($request);
+    }
+
+    /**
+     * Resolve a method name to a Request class.
+     *
+     * Attempts to find a Request class matching the method name pattern.
+     * For example: 'getGroups' -> GetGroups, 'getReportInGroup' -> GetReportInGroup
+     *
+     * @param  string  $method  The method name
+     * @return class-string<Request>|null The fully qualified Request class name or null
+     */
+    protected static function resolveRequestClass(string $method): ?string
+    {
+        // Convert camelCase method to PascalCase class name
+        $className = ucfirst($method);
+
+        // Common request namespaces to search
+        $namespaces = [
+            "InterWorks\\PowerBI\\Requests\\Groups\\{$className}",
+            "InterWorks\\PowerBI\\Requests\\Reports\\{$className}",
+            "InterWorks\\PowerBI\\Requests\\Dashboards\\{$className}",
+            "InterWorks\\PowerBI\\Requests\\EmbedToken\\{$className}",
+            "InterWorks\\PowerBI\\Requests\\Admin\\Groups\\{$className}",
+        ];
+
+        foreach ($namespaces as $fqcn) {
+            if (class_exists($fqcn)) {
+                /** @var class-string<Request> */
+                return $fqcn;
             }
         }
 
-        // Return null to use default Saloon exception handling
         return null;
     }
 }

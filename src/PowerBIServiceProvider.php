@@ -22,4 +22,20 @@ class PowerBIServiceProvider extends PackageServiceProvider
             ->hasMigration('create_laravel_powerbi_table')
             ->hasCommand(PowerBICommand::class);
     }
+
+    /**
+     * Register the package services.
+     *
+     * Registers the PowerBI factory class as a singleton in the container.
+     * This allows the facade to resolve the factory and maintain state
+     * across multiple calls.
+     */
+    public function register(): void
+    {
+        parent::register();
+
+        $this->app->singleton(PowerBI::class, function () {
+            return new PowerBI;
+        });
+    }
 }
