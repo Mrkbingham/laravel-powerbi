@@ -13,10 +13,12 @@ test('can get groups', function () {
         GetGroups::class => new PowerBIFixture('groups/get-groups'),
     ]);
 
-    // Create the PowerBI connection and authenticate
+    // Create the Service Principal connection
     $powerBIConnection = new PowerBIServicePrincipal;
-    $authenticator = $powerBIConnection->getAccessToken();
-    $powerBIConnection->authenticate($authenticator);
+
+    // Token authentication only needed when recording responses
+    // $authenticator = $powerBIConnection->getAccessToken();
+    // $powerBIConnection->authenticate($authenticator);
 
     // Send the request
     $request = new GetGroups;

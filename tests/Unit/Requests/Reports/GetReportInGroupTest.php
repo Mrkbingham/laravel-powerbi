@@ -12,10 +12,12 @@ test('can get single report from a specified group', function () {
         GetReportInGroup::class => new PowerBIFixture('reports/get-report-in-group'),
     ]);
 
-    // Create the PowerBI connection and authenticate
+    // Create the Service Principal connection
     $powerBIConnection = new PowerBIServicePrincipal;
-    $authenticator = $powerBIConnection->getAccessToken();
-    $powerBIConnection->authenticate($authenticator);
+
+    // Token authentication only needed when recording responses
+    // $authenticator = $powerBIConnection->getAccessToken();
+    // $powerBIConnection->authenticate($authenticator);
 
     // Send the request
     $request = new GetReportInGroup(env('POWER_BI_GROUP_ID'), env('POWER_BI_REPORT_ID'));
