@@ -53,9 +53,16 @@ class PowerBIServicePrincipal extends PowerBIConnectorBase implements Cacheable
             );
         }
 
-        $this->tenant = $tenant ?? Config::string('powerbi.tenant');
-        $this->clientId = $clientId ?? Config::string('powerbi.client_id');
-        $this->clientSecret = $clientSecret ?? Config::string('powerbi.client_secret');
+        /** @var string $configTenant */
+        $configTenant = Config::get('powerbi.tenant', '');
+        /** @var string $configClientId */
+        $configClientId = Config::get('powerbi.client_id', '');
+        /** @var string $configClientSecret */
+        $configClientSecret = Config::get('powerbi.client_secret', '');
+
+        $this->tenant = $tenant ?? $configTenant;
+        $this->clientId = $clientId ?? $configClientId;
+        $this->clientSecret = $clientSecret ?? $configClientSecret;
         $this->connectionAccountType = $connectionAccountType;
 
         // Configure caching based on package configuration
@@ -70,7 +77,7 @@ class PowerBIServicePrincipal extends PowerBIConnectorBase implements Cacheable
      */
     protected function configureCaching(): void
     {
-        if (! Config::boolean('powerbi.cache.enabled')) {
+        if (! (bool) Config::get('powerbi.cache.enabled', true)) {
             $this->disableCaching();
         }
     }

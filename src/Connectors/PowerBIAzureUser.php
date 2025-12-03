@@ -63,7 +63,7 @@ class PowerBIAzureUser extends PowerBIConnectorBase implements Cacheable
      */
     protected function configureCaching(): void
     {
-        if (! Config::boolean('powerbi.cache.enabled')) {
+        if (! (bool) Config::get('powerbi.cache.enabled', true)) {
             $this->disableCaching();
         }
     }
